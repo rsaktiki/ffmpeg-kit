@@ -88,3 +88,39 @@ jobs:
       - name: print ffbuild logs
         if: ${{ failure() }}
         run: '[[ -f ./src/ffmpeg/ffbuild/config.log ]] && tail -50 ./src/ffmpeg/ffbuild/config.log'
+      - name: collect & zip artifacts
+        if: always()
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+
+          # Logs (selalu bawa)
+          [[ -f build.log ]] && cp -f build.log artifacts/ || true
+          [[ -f src/ffmpeg/ffbuild/config.log ]] && \
+            mkdir -p artifacts/ffbuild && cp -f src/ffmpeg/ffbuild/config.log artifacts/ffbuild/ || true
+
+          # Kumpulkan keluaran umum: AAR/APK/AAB/SO/STATIC LIB
+          shopt -s globstar nullglob
+          for f in **/*.aar **/*.apk **/*.aab **/libs/**/*.so **/jniLibs/**/*.so **/build/**/*.so **/build/**/*.a; do
+            d="artifacts/$(dirname "$f")"
+            mkdir -p "$d"
+            cp -f "$f" "$d/"
+          done
+
+          # (Opsional) kalau ada folder prebuilt/ atau hasil FFmpeg kustom, bawa juga tapi exclude object
+          for p in prebuilt src/ffmpeg/build src/ffmpeg/android; do
+            if [ -d "$p" ]; then
+              rsync -a --exclude='*.o' --exclude='*.obj' --exclude='.git' "$p"/ "artifacts/$p"/ || true
+            fi
+          done
+
+          (cd artifacts && zip -r ../android-${{ matrix.ndk-version }}-${{ github.run_number }}.zip .)
+
+      - name: upload artifact zip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.ndk-version }}-${{ github.run_number }}
+          path: android-${{ matrix.ndk-version }}-${{ github.run_number }}.zip
+          if-no-files-found: warn
+          retention-days: 14
